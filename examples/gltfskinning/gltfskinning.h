@@ -234,4 +234,10 @@ class VulkanExample : public VulkanExampleBase
 	virtual void render();
 	virtual void viewChanged();
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay);
+
+	virtual void keyPressed(uint32_t key )
+	{
+		if (key == 32)
+			paused = !paused;
+	}
 };

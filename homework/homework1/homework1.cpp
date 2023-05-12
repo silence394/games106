@@ -44,6 +44,8 @@ public:
 		glm::vec3 normal;
 		glm::vec2 uv;
 		glm::vec3 color;
+		glm::vec4 jointIndices;
+		glm::vec4 jointWeights;
 	};
 
 	// Single vertex buffer for all primitives
@@ -108,6 +110,21 @@ public:
 		int32_t imageIndex;
 	};
 
+	// Skin
+
+	struct Skin
+	{
+		std::string				name;
+		Node*					skeletonRoot = nullptr;
+		std::vector<glm::mat4>	inverseBindMatrices;
+		std::vector<Node*>		joints;
+		vks::Buffer				ssbo;
+		VkDescriptorSet			descriptorSet;
+	};
+
+	// Animation.
+	;//struct Animat
+	
 	/*
 		Model data
 	*/
