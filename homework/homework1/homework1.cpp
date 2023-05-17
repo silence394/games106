@@ -26,6 +26,7 @@
 #include "tiny_gltf.h"
 
 #include "vulkanexamplebase.h"
+#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
@@ -80,6 +81,7 @@ public:
 	// A node represents an object in the glTF scene graph
 	struct Node {
 		Node* parent;
+		uint32_t index;
 		std::vector<Node*> children;
 		Mesh mesh;
 		glm::mat4 matrix;
@@ -111,11 +113,10 @@ public:
 	};
 
 	// Skin
-
 	struct Skin
 	{
 		std::string				name;
-		Node*					skeletonRoot = nullptr;
+		Node*					skeletonNode = nullptr;
 		std::vector<glm::mat4>	inverseBindMatrices;
 		std::vector<Node*>		joints;
 		vks::Buffer				ssbo;
@@ -123,7 +124,30 @@ public:
 	};
 
 	// Animation.
-	;//struct Animat
+	struct AnimationSampler
+	{
+		std::string            interpolation;
+		std::vector<float>     inputs;
+		std::vector<glm::vec4> outputsVec4;
+	};
+
+	struct AnimationChannel
+	{
+		std::string path;
+		Node *      node;
+		uint32_t    samplerIndex;
+	};
+	
+	struct Animation
+	{
+		std::string			name;
+		std::vector<AnimationSampler> samplers;
+		std::vector<AnimationChannel> channels;
+		float start = std::numeric_limits<float>::max();
+		float end = std::numeric_limits<float>::min();
+
+		float currentTime;
+	};
 	
 	/*
 		Model data
@@ -132,6 +156,8 @@ public:
 	std::vector<Texture> textures;
 	std::vector<Material> materials;
 	std::vector<Node*> nodes;
+	std::vector<Skin> skins;
+	std::vector<Animation> animations;
 
 	~VulkanglTFModel()
 	{
@@ -201,6 +227,128 @@ public:
 		}
 	}
 
+	Node* findNode(Node* node, uint32_t index)
+	{
+		Node *nodeFound = nullptr;
+		if (node->index == index)
+		{
+			return node;
+		}
+		for (auto &child : node->children)
+		{
+			nodeFound = findNode(child, index);
+			if (nodeFound)
+			{
+				break;
+			}
+		}
+		return nodeFound;
+	}
+
+	Node* nodeFromIndex(uint32_t index)
+	{
+		Node *nodeFound = nullptr;
+		for (auto &node : nodes)
+		{
+			nodeFound = findNode(node, index);
+			if (nodeFound)
+			{
+				break;
+			}
+		}
+		
+		return nodeFound;
+	}
+
+	// POI: Load the skins from the glTF model
+	void loadSkins(tinygltf::Model& input)
+	{
+		skins.resize(input.skins.size());
+
+		for (size_t i = 0; i < input.skins.size(); i ++)
+		{
+			tinygltf::Skin tinygltfSkin = input.skins[i];
+
+			Skin& skin = skins[i];
+			skin.name = tinygltfSkin.name;
+
+			// 获取skin对应的node节点.
+			skin.skeletonNode = nodeFromIndex(tinygltfSkin.skeleton);
+			
+			for (int jointIndex : tinygltfSkin.joints)
+			{
+				Node* node = nodeFromIndex(jointIndex);
+				if (node)
+					skin.joints.push_back(node);
+			}
+
+			// Get the inverse bind matrices from the buffer associated to this skin
+			if (tinygltfSkin.inverseBindMatrices > -1)
+			{
+				const tinygltf::Accessor& accessor = input.accessors[tinygltfSkin.inverseBindMatrices];
+				const tinygltf::BufferView& bufferView = input.bufferViews[accessor.bufferView];
+				const tinygltf::Buffer& buffer = input.buffers[bufferView.buffer];
+
+				skin.inverseBindMatrices.resize(accessor.count);
+
+				memcpy(skin.inverseBindMatrices.data(), &buffer.data[accessor.byteOffset + bufferView.byteOffset], accessor.count * sizeof(glm::mat4));
+
+				VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+					&skin.ssbo, sizeof(glm::mat4) * skin.inverseBindMatrices.size(),
+					skin.inverseBindMatrices.data()));
+
+				VK_CHECK_RESULT(skin.ssbo.map());
+			}
+		}
+	}
+
+	void loadAnimations(tinygltf::Model& input)
+	{
+		animations.resize(input.animations.size());
+
+		for (size_t i = 0; i < input.animations.size(); i ++)
+		{
+			tinygltf::Animation& tinygltfAnim = input.animations[i];
+
+			Animation& anim = animations[i];
+
+			anim.name = tinygltfAnim.name;
+
+			// Read keyframe.
+			anim.samplers.resize(tinygltfAnim.samplers.size());
+			for (size_t j = 0; j < tinygltfAnim.samplers.size(); j ++)
+			{
+				tinygltf::AnimationSampler& tinygltfSampler = tinygltfAnim.samplers[j];
+				AnimationSampler& sampler = anim.samplers[j];
+
+				const tinygltf::Accessor& accessor = input.accessors[tinygltfSampler.input];
+				const tinygltf::BufferView& bufferView = input.bufferViews[accessor.bufferView];
+				const tinygltf::Buffer& buffer = input.buffers[bufferView.buffer];
+
+				const void* dataPtr = &buffer.data[accessor.byteOffset + bufferView.byteOffset];
+				const float* buf = static_cast<const float*>(dataPtr);
+
+				for (size_t index = 0; index < accessor.count; index ++)
+				{
+					sampler.inputs.push_back(buf[index]);
+				}
+
+				// Init start and end time.
+				for (auto input : sampler.inputs)
+				{
+					if (input < anim.start)
+						anim.start = input;
+
+					if (input > anim.end)
+						anim.end = input;
+				}
+
+				// read mat.
+				
+			}
+		}
+	}
+	
 	void loadMaterials(tinygltf::Model& input)
 	{
 		materials.resize(input.materials.size());
@@ -528,6 +676,14 @@ public:
 				const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
 				glTFModel.loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
 			}
+
+			// LoadSkins.
+			loadSkins(glTFModel);
+
+			// LoadAnimations.
+			
+			
+			// InitPos
 		}
 		else {
 			vks::tools::exitFatal("Could not open the glTF file.\n\nThe file is part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
