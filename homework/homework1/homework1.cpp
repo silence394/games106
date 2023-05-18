@@ -423,11 +423,13 @@ public:
 		}
 	}
 
-	void loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, VulkanglTFModel::Node* parent, std::vector<uint32_t>& indexBuffer, std::vector<VulkanglTFModel::Vertex>& vertexBuffer)
+	void loadNode(const tinygltf::Node& inputNode, const tinygltf::Model& input, VulkanglTFModel::Node* parent, uint32_t nodeIndex, std::vector<uint32_t>& indexBuffer, std::vector<VulkanglTFModel::Vertex>& vertexBuffer)
 	{
 		VulkanglTFModel::Node* node = new VulkanglTFModel::Node{};
 		node->matrix = glm::mat4(1.0f);
 		node->parent = parent;
+		node->index = nodeIndex;
+		node->skin = inputNode.skin;
 
 		// Get the local node matrix
 		// It's either made up from translation, rotation, scale or a 4x4 matrix
@@ -448,7 +450,7 @@ public:
 		// Load node's children
 		if (inputNode.children.size() > 0) {
 			for (size_t i = 0; i < inputNode.children.size(); i++) {
-				loadNode(input.nodes[inputNode.children[i]], input , node, indexBuffer, vertexBuffer);
+				loadNode(input.nodes[inputNode.children[i]], input, node, inputNode.children[i], indexBuffer, vertexBuffer);
 			}
 		}
 
@@ -467,6 +469,9 @@ public:
 					const float* positionBuffer = nullptr;
 					const float* normalsBuffer = nullptr;
 					const float* texCoordsBuffer = nullptr;
+					const uint16_t* jointIndexBuffer = nullptr;
+					const float* jointWeightBuffer = nullptr;
+					  
 					size_t vertexCount = 0;
 
 					// Get buffer data for vertex positions
@@ -490,6 +495,26 @@ public:
 						texCoordsBuffer = reinterpret_cast<const float*>(&(input.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
 					}
 
+					// Read skinning mat index.
+					if (glTFPrimitive.attributes.find("JOINTS_0") != glTFPrimitive.attributes.end())
+					{
+						const tinygltf::Accessor& accessor = input.accessors[glTFPrimitive.attributes.find("JOINTS_0")->second];
+						const tinygltf::BufferView& view = input.bufferViews[accessor.bufferView];
+
+						jointIndexBuffer = reinterpret_cast<const uint16_t*>(&input.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]);
+					}
+
+					// Read skinning weights.
+					if (glTFPrimitive.attributes.find("WEIGHTS_0") != glTFPrimitive.attributes.end())
+					{
+						const tinygltf::Accessor& accessor = input.accessors[glTFPrimitive.attributes.find("WEIGHTS_0")->second];
+						const tinygltf::BufferView& view = input.bufferViews[accessor.bufferView];
+
+						jointWeightBuffer = reinterpret_cast<const float*>(&input.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]);
+					}
+
+					bool hasSkin = jointIndexBuffer != nullptr && jointWeightBuffer != nullptr;
+					
 					// Append data to model's vertex buffer
 					for (size_t v = 0; v < vertexCount; v++) {
 						Vertex vert{};
@@ -497,6 +522,10 @@ public:
 						vert.normal = glm::normalize(glm::vec3(normalsBuffer ? glm::make_vec3(&normalsBuffer[v * 3]) : glm::vec3(0.0f)));
 						vert.uv = texCoordsBuffer ? glm::make_vec2(&texCoordsBuffer[v * 2]) : glm::vec3(0.0f);
 						vert.color = glm::vec3(1.0f);
+
+						vert.jointIndices = hasSkin ?  glm::make_vec4(&jointIndexBuffer[v * 4]) : glm::vec4(0.0f);
+						vert.jointWeights = hasSkin ? glm::make_vec4(&jointWeightBuffer[v * 4]) : glm::vec4(0.0f);
+						
 						vertexBuffer.push_back(vert);
 					}
 				}
@@ -731,7 +760,7 @@ public:
 			const tinygltf::Scene& scene = glTFInput.scenes[0];
 			for (size_t i = 0; i < scene.nodes.size(); i++) {
 				const tinygltf::Node node = glTFInput.nodes[scene.nodes[i]];
-				glTFModel.loadNode(node, glTFInput, nullptr, indexBuffer, vertexBuffer);
+				glTFModel.loadNode(node, glTFInput, nullptr, scene.nodes[i], indexBuffer, vertexBuffer);
 			}
 
 			// LoadSkins.
