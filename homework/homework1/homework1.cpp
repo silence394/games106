@@ -26,7 +26,6 @@
 #include "tiny_gltf.h"
 
 #include "vulkanexamplebase.h"
-#include "VulkanglTFModel.h"
 
 #define ENABLE_VALIDATION false
 
@@ -82,6 +81,7 @@ public:
 	struct Node {
 		Node* parent;
 		uint32_t index;
+		uint32_t skin;
 		std::vector<Node*> children;
 		Mesh mesh;
 		glm::mat4 matrix;
@@ -321,31 +321,88 @@ public:
 				tinygltf::AnimationSampler& tinygltfSampler = tinygltfAnim.samplers[j];
 				AnimationSampler& sampler = anim.samplers[j];
 
-				const tinygltf::Accessor& accessor = input.accessors[tinygltfSampler.input];
-				const tinygltf::BufferView& bufferView = input.bufferViews[accessor.bufferView];
-				const tinygltf::Buffer& buffer = input.buffers[bufferView.buffer];
-
-				const void* dataPtr = &buffer.data[accessor.byteOffset + bufferView.byteOffset];
-				const float* buf = static_cast<const float*>(dataPtr);
-
-				for (size_t index = 0; index < accessor.count; index ++)
 				{
-					sampler.inputs.push_back(buf[index]);
-				}
+					const tinygltf::Accessor& accessor = input.accessors[tinygltfSampler.input];
+					const tinygltf::BufferView& bufferView = input.bufferViews[accessor.bufferView];
+					const tinygltf::Buffer& buffer = input.buffers[bufferView.buffer];
 
-				// Init start and end time.
-				for (auto input : sampler.inputs)
+					const void* dataPtr = &buffer.data[accessor.byteOffset + bufferView.byteOffset];
+					const float* buf = static_cast<const float*>(dataPtr);
+
+					for (size_t index = 0; index < accessor.count; index ++)
+					{
+						sampler.inputs.push_back(buf[index]);
+					}
+
+					// Init start and end time.
+					for (auto input : sampler.inputs)
+					{
+						if (input < anim.start)
+							anim.start = input;
+
+						if (input > anim.end)
+							anim.end = input;
+					}
+				}
+	
+
+				// read matrix.
 				{
-					if (input < anim.start)
-						anim.start = input;
+					const tinygltf::Accessor& accessor = input.accessors[tinygltfSampler.output];
+					const tinygltf::BufferView& bufferView = input.bufferViews[accessor.bufferView];
+					const tinygltf::Buffer& buffer = input.buffers[bufferView.buffer];
 
-					if (input > anim.end)
-						anim.end = input;
+					const void* dataPtr = &buffer.data[accessor.byteOffset + bufferView.byteOffset];
+					
+					switch (accessor.type) {
+					case TINYGLTF_TYPE_VEC3: {
+							const glm::vec3 *buf = static_cast<const glm::vec3*> (dataPtr);
+							for (size_t index = 0; index < accessor.count; index++) {
+								sampler.outputsVec4.push_back(glm::vec4(buf[index], 0.0f));
+							}
+							break;
+					}
+					case TINYGLTF_TYPE_VEC4: {
+							const glm::vec4 *buf = static_cast<const glm::vec4*> (dataPtr);
+							for (size_t index = 0; index < accessor.count; index++) {
+								sampler.outputsVec4.push_back(buf[index]);
+							}
+							break;
+					}
+					default: {
+							std::cout << "unknown type" << std::endl;
+							break;
+					}
+					}
 				}
-
-				// read mat.
-				
 			}
+
+			// Read channels.
+			anim.channels.resize(tinygltfAnim.channels.size());
+			for (size_t j = 0; j < tinygltfAnim.channels.size(); j ++)
+			{
+				tinygltf::AnimationChannel& tinygltfChannel = tinygltfAnim.channels[j];
+				AnimationChannel& animaChannel = anim.channels[j];
+				animaChannel.node = nodeFromIndex(tinygltfChannel.target_node);
+				animaChannel.path = tinygltfChannel.target_path;
+				animaChannel.samplerIndex = tinygltfChannel.sampler;
+			}
+		}
+	}
+
+	void updateJoints(Node* node)
+	{
+		if (!node)
+			return;
+		
+		if (node->skin > -1)
+		{
+			
+		}
+
+		for (auto child : node->children)
+		{
+			updateJoints(child);
 		}
 	}
 	
@@ -678,12 +735,15 @@ public:
 			}
 
 			// LoadSkins.
-			loadSkins(glTFModel);
-
+			glTFModel.loadSkins(glTFInput);
 			// LoadAnimations.
+			glTFModel.loadAnimations(glTFInput);
 			
-			
-			// InitPos
+			// InitPos.
+			for (auto node : glTFModel.nodes)
+			{
+				glTFModel.updateJoints(node);
+			}
 		}
 		else {
 			vks::tools::exitFatal("Could not open the glTF file.\n\nThe file is part of the additional asset pack.\n\nRun \"download_assets.py\" in the repository root to download the latest version.", -1);
