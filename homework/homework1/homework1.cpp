@@ -854,7 +854,8 @@ public:
 
 	void loadAssets()
 	{
-		loadglTFFile(getAssetPath() + "buster_drone/busterDrone.gltf");
+		//loadglTFFile(getAssetPath() + "buster_drone/busterDrone.gltf");
+		loadglTFFile(getAssetPath() + "models/CesiumMan/glTF/CesiumMan.gltf");
 	}
 
 	void setupDescriptors()
