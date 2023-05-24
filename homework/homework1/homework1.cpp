@@ -81,14 +81,26 @@ public:
 	struct Node {
 		Node* parent;
 		uint32_t index;
-		uint32_t skin;
+	
 		std::vector<Node*> children;
 		Mesh mesh;
+
+		// Animation
+		uint32_t skin = -1;
+		glm::vec3 translation {};
+		glm::vec3 scale{1.0f};
+		glm::quat rotation{};
+		
 		glm::mat4 matrix;
 		~Node() {
 			for (auto& child : children) {
 				delete child;
 			}
+		}
+
+		glm::mat4 getLocalMatrix()
+		{
+			return glm::translate(glm::mat4(1.0f), translation) * glm::mat4(rotation) * glm::scale(glm::mat4(1.0f), scale) * matrix;
 		}
 	};
 
@@ -390,6 +402,19 @@ public:
 		}
 	}
 
+	glm::mat4 getNodeMatrix(Node* node)
+	{
+		glm::mat4 nodeMatrix = 	node->getLocalMatrix();
+		Node* curParent = node->parent;
+		while (curParent)
+		{
+			nodeMatrix = curParent->getLocalMatrix() * nodeMatrix;
+			curParent = curParent->parent;
+		}
+
+		return nodeMatrix;
+	}
+	
 	void updateJoints(Node* node)
 	{
 		if (!node)
@@ -397,7 +422,15 @@ public:
 		
 		if (node->skin > -1)
 		{
-			
+			glm::mat4 inverseMatrix = glm::inverse(getNodeMatrix(node));
+			Skin& skin = skins[node->skin];
+			size_t numJoints = skin.joints.size();
+			std::vector<glm::mat4> jointMatrices(numJoints);
+			for (size_t i = 0; i < numJoints; i ++)
+			{
+				jointMatrices[i] = getNodeMatrix(skin.joints[i]) * skin.inverseBindMatrices[i];
+				jointMatrices[i] = inverseMatrix * jointMatrices[i];
+			}
 		}
 
 		for (auto child : node->children)
