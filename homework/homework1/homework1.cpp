@@ -86,10 +86,11 @@ public:
 		Mesh mesh;
 
 		// Animation
-		uint32_t skin = -1;
+		uint32_t skin = static_cast<uint32_t>(-1);
 		glm::vec3 translation {};
 		glm::vec3 scale{1.0f};
 		glm::quat rotation{};
+		bool animated = false;
 		
 		glm::mat4 matrix;
 		~Node() {
@@ -100,7 +101,7 @@ public:
 
 		glm::mat4 getLocalMatrix()
 		{
-			return glm::translate(glm::mat4(1.0f), translation) * glm::mat4(rotation) * glm::scale(glm::mat4(1.0f), scale) * matrix;
+			return animated ? glm::translate(glm::mat4(1.0f), translation) * glm::mat4(rotation) * glm::scale(glm::mat4(1.0f), scale) : matrix;
 		}
 	};
 
@@ -463,7 +464,7 @@ public:
 		node->parent = parent;
 		node->index = nodeIndex;
 		node->skin = inputNode.skin;
-
+		
 		// Get the local node matrix
 		// It's either made up from translation, rotation, scale or a 4x4 matrix
 		if (inputNode.translation.size() == 3) {
@@ -479,7 +480,7 @@ public:
 		if (inputNode.matrix.size() == 16) {
 			node->matrix = glm::make_mat4x4(inputNode.matrix.data());
 		};
-
+		
 		// Load node's children
 		if (inputNode.children.size() > 0) {
 			for (size_t i = 0; i < inputNode.children.size(); i++) {
